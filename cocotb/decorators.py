@@ -336,7 +336,7 @@ class function(object):
     def __call__(self, *args, **kwargs):
 
         @coroutine
-        def execute_function(self, event):
+        def execute_function(self, event, back_event):
             coro = cocotb.coroutine(self._func)(*args, **kwargs)
             try:
                 _outcome = outcomes.Value((yield coro))
@@ -344,12 +344,15 @@ class function(object):
                 _outcome = outcomes.Error(e)
             event.outcome = _outcome
             event.set()
+            back_event.wait()
 
         event = threading.Event()
-        waiter = cocotb.scheduler.queue_function(execute_function(self, event))
+        back_event = threading.Event()
+        waiter = cocotb.scheduler.queue_function(execute_function(self, event, back_event))
         # This blocks the calling external thread until the coroutine finishes
         event.wait()
         waiter.thread_resume()
+        back_event.set()
         return event.outcome.get()
 
     def __get__(self, obj, type=None):

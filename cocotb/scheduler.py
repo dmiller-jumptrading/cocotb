@@ -578,8 +578,10 @@ class Scheduler(object):
         # each entry always has a unique thread.
         t, = matching_threads
 
-        t.thread_suspend()
+        # The main thread blocks in thread_wait and resumes on thread_suspend
+        # so we need to make sure the coroutine is queued before that
         self._pending_coros.append(coroutine)
+        t.thread_suspend()
         return t
 
     def run_in_executor(self, func, *args, **kwargs):
@@ -732,20 +734,19 @@ class Scheduler(object):
         # chaining
         if coro_completed:
             self.unschedule(coroutine)
-            return
+        else:
+            # Don't handle the result if we're shutting down
+            if self._terminate:
+                return
 
-        # Don't handle the result if we're shutting down
-        if self._terminate:
-            return
+            try:
+                result = self._trigger_from_any(result)
+            except TypeError as exc:
+                # restart this coroutine with an exception object telling it that
+                # it wasn't allowed to yield that
+                result = NullTrigger(outcome=outcomes.Error(exc))
 
-        try:
-            result = self._trigger_from_any(result)
-        except TypeError as exc:
-            # restart this coroutine with an exception object telling it that
-            # it wasn't allowed to yield that
-            result = NullTrigger(outcome=outcomes.Error(exc))
-
-        self._coroutine_yielded(coroutine, result)
+            self._coroutine_yielded(coroutine, result)
 
         # We do not return from here until pending threads have completed, but only
         # from the main thread, this seems like it could be problematic in cases
